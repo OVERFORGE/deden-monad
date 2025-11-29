@@ -1,0 +1,682 @@
+// Decentralized Den - Production-Ready Prisma Schema
+// ✅ UPDATED: Added Reservation System for 2+ nights bookings
+// Version: 4.0 - MongoDB Optimized
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// NEXTAUTH ADAPTER MODELS - Required for authentication
+// ============================================================================
+
+model Account {
+  id                String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String  @db.ObjectId
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.String
+  access_token      String? @db.String
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.String
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  sessionToken String   @unique
+  userId       String   @db.ObjectId
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================================================
+// ENUMS - Type-safe status values
+// ============================================================================
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  WAITLISTED
+  RESERVED      // ✅ NEW: After $30 reservation paid, awaiting remaining payment
+  CANCELLED
+  REFUNDED
+  EXPIRED
+  FAILED
+}
+
+enum PaymentToken {
+  USDC
+  USDT
+}
+
+enum RoomType {
+  SHARED
+  PRIVATE
+  SUITE
+}
+
+enum UserRole {
+  GUEST
+  ADMIN
+  HOST
+  SPONSOR
+}
+
+// ============================================================================
+// USER MODEL - Authentication, profile, and privacy
+// ============================================================================
+
+model User {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  
+  // Authentication - NextAuth fields
+  name            String?
+  email           String?   @unique
+  emailVerified   DateTime?
+  image           String?
+  
+  // Web3 Authentication
+  walletAddress   String?
+  
+  // Profile Information
+  displayName     String?
+  firstName       String?
+  lastName        String?
+  role            String?
+  bio             String?
+  avatar          String?
+  gender          String?
+  age             Int?
+  mobileNumber    String?
+  
+  // Social Links
+  socialTwitter   String?
+  socialTelegram  String?
+  socialLinkedin  String?
+  socialGithub    String?
+  socialWebsite   String?
+  
+  // Privacy & Preferences
+  optInGuestList      Boolean   @default(false)
+  optInEmailMarketing Boolean   @default(false)
+  shareContactInfo    Boolean   @default(false)
+  contentReuseConsent Boolean   @default(false)
+  
+  // System
+  userRole        UserRole  @default(GUEST)
+  isActive        Boolean   @default(true)
+  lastLoginAt     DateTime?
+  
+  // NextAuth Relations
+  accounts        Account[]
+  sessions        Session[]
+  
+  // App Relations
+  bookings        Booking[]
+  reviews         Review[]
+  waitlistEntries WaitlistEntry[]
+  refunds         Refund[]
+  activities      ActivityLog[]
+  
+  // Metadata
+  metadata        Json?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([userRole])
+  @@index([createdAt])
+  @@index([walletAddress])
+}
+
+// ============================================================================
+// STAY MODEL - The core product/event
+// ============================================================================
+
+model Stay {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  stayId          String    @unique
+  
+  // Basic Information
+  title           String
+  slug            String    @unique
+  description     String    @default("")
+  shortDescription String?
+  location        String
+  venue           String?
+  
+  // Dates & Duration (NIGHTS)
+  startDate       DateTime
+  endDate         DateTime
+  duration        Int
+  
+  // Capacity
+  slotsTotal      Int
+  slotsAvailable  Int
+  guestCapacity   Int?
+  
+  // Pricing PER NIGHT (used as default for rooms)
+  priceUSDC       Float
+  priceUSDT       Float
+  currency        String    @default("USD")
+  depositAmount   Float?
+  
+  // ✅ NEW: Reservation Configuration
+  requiresReservation Boolean   @default(false)  // Enable reservation system
+  reservationAmount   Float     @default(30)     // Default $30 reservation
+  minNightsForReservation Int   @default(2)      // Minimum nights to require reservation
+  
+  // Media & Gallery
+  heroImage       String?
+  galleryImages   String[]  @default([])
+  images          String[]  @default([])
+  videoUrl        String?
+  
+  // Rooms Configuration (prices are PER NIGHT)
+  rooms           Json[]    @default([])
+  
+  // Amenities & Features
+  amenities       String[]  @default([])
+  programHighlights Json?
+  highlights        String[] @default([])
+  rules             String[] @default([])
+  
+  // Logistics
+  checkInTime     String?
+  checkOutTime    String?
+  address         Json?
+  
+  // Configuration
+  isPublished     Boolean   @default(false)
+  isFeatured      Boolean   @default(false)
+  allowWaitlist   Boolean   @default(true)
+  autoConfirm     Boolean   @default(false)
+  
+  // Cancellation Policy
+  refundableUntil DateTime?
+  cancellationPolicy Json?
+  
+  // SEO & Marketing
+  metaTitle       String?
+  metaDescription String?
+  tags            String[]  @default([])
+  
+  // Relations
+  bookings        Booking[]
+  sponsors        Sponsor[]   @relation(fields: [sponsorIds], references: [id])
+  sponsorIds      String[]    @db.ObjectId
+  reviews         Review[]
+  waitlistEntries WaitlistEntry[]
+  addons          Addon[]
+  referralCodes   ReferralCode[]
+  
+  // Metadata
+  metadata        Json?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([startDate])
+  @@index([isPublished, isFeatured])
+  @@index([tags])
+  @@index([duration])
+}
+
+// ============================================================================
+// REFERRAL CODE MODEL - Community Referral System
+// ============================================================================
+
+model ReferralCode {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  
+  // Community Info
+  communityName   String
+  code            String    @unique
+  
+  // Link to specific stay/event
+  stay            Stay      @relation(fields: [stayId], references: [id])
+  stayId          String    @db.ObjectId
+  
+  // Discount Configuration
+  discountPercent Int       @default(10)
+  
+  // Usage Tracking
+  usageCount      Int       @default(0)
+  maxUsage        Int?
+  
+  // Status
+  isActive        Boolean   @default(true)
+  expiresAt       DateTime?
+  
+  // Relations
+  bookings        Booking[]
+  
+  // Metadata
+  notes           String?
+  createdBy       String?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([stayId])
+  @@index([communityName])
+  @@index([isActive])
+}
+
+// ============================================================================
+// BOOKING MODEL - Core transaction/reservation
+// ✅ UPDATED: Added reservation payment fields and RESERVED status
+// ============================================================================
+
+model Booking {
+  id              String        @id @default(auto()) @map("_id") @db.ObjectId
+  bookingId       String        @unique
+  
+  // Relations
+  user            User          @relation(fields: [userId], references: [id])
+  userId          String        @db.ObjectId
+  stay            Stay          @relation(fields: [stayId], references: [id])
+  stayId          String        @db.ObjectId
+  
+  // Guest Info
+  guestGender     String?
+  guestAge        Int?
+  guestMobile     String?
+  preferredRoomId String? 
+  
+  // Booking Details
+  status          BookingStatus @default(PENDING)
+  roomType        RoomType?
+  selectedRoomId  String?
+  guestCount      Int           @default(1)
+  
+  // Nights-Based Pricing Fields with Check-In/Out Dates
+  numberOfNights      Int?
+  checkInDate         DateTime?
+  checkOutDate        DateTime?
+  pricePerNightUSDC   Float?
+  pricePerNightUSDT   Float?
+  
+  // Total Prices (calculated: pricePerNight × numberOfNights)
+  selectedRoomPriceUSDC Float?
+  selectedRoomPriceUSDT Float?
+  selectedRoomName      String?
+  
+  // Guest Info Snapshot
+  guestName       String?
+  guestEmail      String?
+  guestPhone      String?
+  
+  // Referral Code & Discount Tracking
+  referralCode     ReferralCode?  @relation(fields: [referralCodeId], references: [id])
+  referralCodeId   String?        @db.ObjectId
+  referralCodeUsed String?
+  
+  discountPercent  Int?
+  discountAmount   Float?
+  originalPrice    Float?
+  finalPrice       Float?
+  
+  isLoyaltyDiscount Boolean       @default(false)
+  
+  // ✅ NEW: Reservation Payment Fields (for 2+ nights stays)
+  requiresReservation    Boolean   @default(false)  // Does this booking need reservation?
+  reservationAmount      Float?                     // Amount for reservation ($30)
+  reservationPaid        Boolean   @default(false)  // Has reservation been paid?
+  reservationTxHash      String?                    // Transaction hash for reservation
+  reservationPaidAt      DateTime?                  // When reservation was paid
+  reservationChainId     Int?                       // Chain used for reservation
+  reservationToken       String?                    // Token used for reservation (USDC/USDT)
+  
+  remainingAmount        Float?                     // Amount remaining after reservation
+  remainingPaid          Boolean   @default(false)  // Has remaining been paid?
+  remainingTxHash        String?                    // Transaction hash for remaining
+  remainingPaidAt        DateTime?                  // When remaining was paid
+  remainingChainId       Int?                       // Chain used for remaining
+  remainingToken         String?                    // Token used for remaining
+  
+  remainingDueDate       DateTime?                  // When remaining payment is due (check-in date)
+  remainingPaymentSent   Boolean   @default(false)  // Email reminder sent for remaining?
+  
+  // Original Payment Information (kept for backward compatibility)
+  paymentToken    PaymentToken?
+  paymentAmount   Float?
+  amountBaseUnits String?
+  chain           String?
+  chainId         Int?
+  txHash          String?
+  blockNumber     Int?
+  
+  // Payment Details
+  senderAddress   String?
+  receiverAddress String?
+  gasUsed         String?
+  gasFeeUSD       Float?
+  
+  // Session Management
+  sessionToken    String?
+  expiresAt       DateTime?
+  confirmedAt     DateTime?
+  
+  // Add-ons
+  selectedAddons  String[]      @db.ObjectId
+  addonsTotal     Float         @default(0)
+  
+  // Pricing Breakdown
+  subtotal        Float?
+  serviceFee      Float         @default(0)
+  totalPaid       Float?
+  
+  // Privacy & Consent
+  optInGuestList      Boolean   @default(false)
+  shareContactInfo    Boolean   @default(false)
+  contentReuseConsent Boolean   @default(false)
+  
+  // Travel Assistance
+  needsTravelHelp Boolean       @default(false)
+  travelNotes     String?
+  
+  // Admin Notes
+  adminNotes      String?
+  internalTags    String[]      @default([])
+  
+  // NFT Ticket
+  nftTokenId      String?
+  nftContractAddress String?
+  nftMinted       Boolean       @default(false)
+  
+  // Relations
+  refund          Refund?
+  activities      ActivityLog[]
+  
+  // Metadata
+  metadata        Json?
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@unique([userId, stayId])
+  @@index([userId])
+  @@index([stayId])
+  @@index([status])
+  @@index([confirmedAt])
+  @@index([createdAt])
+  @@index([txHash])
+  @@index([sessionToken])
+  @@index([numberOfNights])
+  @@index([checkInDate])
+  @@index([checkOutDate])
+  @@index([referralCodeId])
+  @@index([requiresReservation])
+  @@index([reservationPaid])
+  @@index([remainingDueDate])
+}
+
+// ============================================================================
+// WAITLIST MODEL
+// ============================================================================
+
+model WaitlistEntry {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  
+  user            User      @relation(fields: [userId], references: [id])
+  userId          String    @db.ObjectId
+  stay            Stay      @relation(fields: [stayId], references: [id])
+  stayId          String    @db.ObjectId
+  
+  position        Int
+  status          String    @default("active")
+  
+  notifiedAt      DateTime?
+  convertedAt     DateTime?
+  expiresAt       DateTime?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@unique([userId, stayId])
+  @@index([stayId, status])
+  @@index([position])
+}
+
+// ============================================================================
+// SPONSOR MODEL
+// ============================================================================
+
+model Sponsor {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  
+  name            String
+  logo            String?
+  website         String?
+  description     String?
+  
+  stays           Stay[]    @relation(fields: [stayIds], references: [id])
+  stayIds         String[]  @db.ObjectId
+  
+  isActive        Boolean   @default(true)
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([name])
+}
+
+// ============================================================================
+// ADDON MODEL
+// ============================================================================
+
+model Addon {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  
+  stay            Stay      @relation(fields: [stayId], references: [id])
+  stayId          String    @db.ObjectId
+  
+  name            String
+  description     String?
+  priceUSDC       Float
+  priceUSDT       Float
+  
+  isAvailable     Boolean   @default(true)
+  maxQuantity     Int?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([stayId])
+}
+
+// ============================================================================
+// REFUND MODEL
+// ============================================================================
+
+model Refund {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  
+  booking         Booking   @relation(fields: [bookingId], references: [id])
+  bookingId       String    @unique @db.ObjectId
+  user            User      @relation(fields: [userId], references: [id])
+  userId          String    @db.ObjectId
+  
+  amount          Float
+  token           PaymentToken
+  status          String    @default("requested")
+  
+  reason          String?
+  adminNotes      String?
+  
+  refundTxHash    String?
+  refundedAt      DateTime?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([status])
+  @@index([userId])
+}
+
+// ============================================================================
+// REVIEW MODEL
+// ============================================================================
+
+model Review {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  
+  user            User      @relation(fields: [userId], references: [id])
+  userId          String    @db.ObjectId
+  stay            Stay      @relation(fields: [stayId], references: [id])
+  stayId          String    @db.ObjectId
+  
+  rating          Int
+  title           String?
+  comment         String?
+  
+  isPublished     Boolean   @default(true)
+  isVerified      Boolean   @default(false)
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([stayId, isPublished])
+  @@index([rating])
+}
+
+// ============================================================================
+// ACTIVITY LOG
+// ============================================================================
+
+model ActivityLog {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  
+  user            User?     @relation(fields: [userId], references: [id])
+  userId          String?   @db.ObjectId
+  booking         Booking?  @relation(fields: [bookingId], references: [id])
+  bookingId       String?   @db.ObjectId
+  
+  action          String
+  entity          String
+  entityId        String?
+  
+  details         Json?
+  ipAddress       String?
+  userAgent       String?
+  
+  createdAt       DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([bookingId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// PROMO CODE MODEL
+// ============================================================================
+
+model PromoCode {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  
+  code            String    @unique
+  description     String?
+  
+  discountType    String
+  discountValue   Float
+  
+  maxUses         Int?
+  usedCount       Int       @default(0)
+  
+  validFrom       DateTime
+  validUntil      DateTime
+  
+  isActive        Boolean   @default(true)
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([validFrom, validUntil])
+}
+
+// ============================================================================
+// NOTIFICATION MODEL
+// ============================================================================
+
+model Notification {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  
+  recipientEmail  String
+  recipientId     String?   @db.ObjectId
+  
+  type            String
+  subject         String
+  body            String
+  
+  status          String    @default("pending")
+  sentAt          DateTime?
+  error           String?
+  
+  metadata        Json?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([status])
+  @@index([recipientEmail])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// SYSTEM CONFIG
+// ============================================================================
+
+model SystemConfig {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  
+  key             String    @unique
+  value           String
+  description     String?
+  
+  updatedAt       DateTime  @updatedAt
+}
+
+// ============================================================================
+// PAYMENT SESSION MODEL
+// ============================================================================
+
+model PaymentSession {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  orderId         String
+  status          String    @default("pending")
+  currency        String
+  humanAmount     String
+  amountBaseUnits String
+  expiresAt       DateTime
+  chainId         Int?
+  txHash          String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
